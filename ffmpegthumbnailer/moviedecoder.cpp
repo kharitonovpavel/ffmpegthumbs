@@ -21,9 +21,20 @@
 
 extern "C" {
 #include <libswscale/swscale.h>
+#include <libavutil/imgutils.h>
+#include <libavcodec/avcodec.h>
 }
 
+
+int avpicture_fill(AVPicture *picture, const uint8_t *ptr,
+             enum AVPixelFormat pix_fmt, int width, int height)
+    {
+        return av_image_fill_arrays(picture->data, picture->linesize,
+                                    ptr, pix_fmt, width, height, 1);
+    }
+
 using namespace std;
+class avcodec_alloc_frame;
 
 namespace ffmpegthumbnailer
 {
@@ -56,6 +67,8 @@ void MovieDecoder::initialize(const QString& filename)
 
     QFileInfo fileInfo(filename);
 
+    
+    
     if ((!m_FormatContextWasGiven) && avformat_open_input(&m_pFormatContext, fileInfo.absoluteFilePath().toLocal8Bit().data(), NULL, NULL) != 0) {
         qDebug() <<  "Could not open input file: " << fileInfo.absoluteFilePath();
         return;
@@ -67,7 +80,7 @@ void MovieDecoder::initialize(const QString& filename)
     }
 
     initializeVideo();
-    m_pFrame = avcodec_alloc_frame();
+    m_pFrame = av_frame_alloc();
 
     if (m_pFrame) {
         m_initialized=true;
@@ -239,7 +252,7 @@ bool MovieDecoder::decodeVideoPacket()
         return false;
     }
 
-    avcodec_get_frame_defaults(m_pFrame);
+    av_frame_unref(m_pFrame);
 
     int frameFinished = 0;
 
@@ -275,7 +288,7 @@ bool MovieDecoder::getVideoPacket()
         if (framesAvailable) {
             frameDecoded = m_pPacket->stream_index == m_VideoStream;
             if (!frameDecoded) {
-                av_free_packet(m_pPacket);
+                av_packet_unref(m_pPacket);
             }
         }
     }
@@ -286,12 +299,13 @@ bool MovieDecoder::getVideoPacket()
 void MovieDecoder::getScaledVideoFrame(int scaledSize, bool maintainAspectRatio, VideoFrame& videoFrame)
 {
     if (m_pFrame->interlaced_frame) {
-        avpicture_deinterlace((AVPicture*) m_pFrame, (AVPicture*) m_pFrame, m_pVideoCodecContext->pix_fmt,
+     /*   avpicture_deinterlace((AVPicture*) m_pFrame, (AVPicture*) m_pFrame, m_pVideoCodecContext->pix_fmt,
                               m_pVideoCodecContext->width, m_pVideoCodecContext->height);
-    }
+    */}
 
     int scaledWidth, scaledHeight;
-    convertAndScaleFrame(PIX_FMT_RGB24, scaledSize, maintainAspectRatio, scaledWidth, scaledHeight);
+    convertAndScaleFrame(AV_PIX_FMT_RGB24, scaledSize, maintainAspectRatio, 
+scaledWidth, scaledHeight);
 
     videoFrame.width = scaledWidth;
     videoFrame.height = scaledHeight;
@@ -302,7 +316,7 @@ void MovieDecoder::getScaledVideoFrame(int scaledSize, bool maintainAspectRatio,
     memcpy((&(videoFrame.frameData.front())), m_pFrame->data[0], videoFrame.lineSize * videoFrame.height);
 }
 
-void MovieDecoder::convertAndScaleFrame(PixelFormat format, int scaledSize, bool maintainAspectRatio, int& scaledWidth, int& scaledHeight)
+void MovieDecoder::convertAndScaleFrame(AVPixelFormat format, int scaledSize, bool maintainAspectRatio, int& scaledWidth, int& scaledHeight)
 {
     calculateDimensions(scaledSize, maintainAspectRatio, scaledWidth, scaledHeight);
     SwsContext* scaleContext = sws_getContext(m_pVideoCodecContext->width, m_pVideoCodecContext->height,
@@ -355,13 +369,13 @@ void MovieDecoder::calculateDimensions(int squareSize, bool maintainAspectRatio,
     }
 }
 
-void MovieDecoder::createAVFrame(AVFrame** avFrame, quint8** frameBuffer, int width, int height, PixelFormat format)
+void MovieDecoder::createAVFrame(AVFrame** avFrame, quint8** frameBuffer, int width, int height, AVPixelFormat format)
 {
-    *avFrame = avcodec_alloc_frame();
+    *avFrame = av_frame_alloc();
 
     int numBytes = avpicture_get_size(format, width, height);
     *frameBuffer = reinterpret_cast<quint8*>(av_malloc(numBytes));
-    avpicture_fill((AVPicture*) *avFrame, *frameBuffer, format, width, height);
+      avpicture_fill((AVPicture*) *avFrame, *frameBuffer, format, width,height);
 }
 
 }
